@@ -9,6 +9,8 @@ import (
 
 	"github.com/infodancer/auth"
 	_ "github.com/infodancer/auth/passwd" // Register passwd backend
+	"github.com/infodancer/msgstore"
+	_ "github.com/infodancer/msgstore/maildir" // Register maildir backend
 	"github.com/infodancer/pop3d/internal/config"
 	"github.com/infodancer/pop3d/internal/pop3"
 	"github.com/infodancer/pop3d/internal/server"
@@ -45,6 +47,20 @@ func main() {
 		}
 	}()
 
+	// Create message store
+	var msgStore msgstore.MessageStore
+	if cfg.Maildir != "" {
+		store, err := msgstore.Open(msgstore.StoreConfig{
+			Type:     "maildir",
+			BasePath: cfg.Maildir,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error opening message store: %v\n", err)
+			os.Exit(1)
+		}
+		msgStore = store
+	}
+
 	// Create server
 	srv, err := server.New(&cfg)
 	if err != nil {
@@ -53,7 +69,7 @@ func main() {
 	}
 
 	// Set POP3 protocol handler
-	handler := pop3.Handler(cfg.Hostname, authAgent, srv.TLSConfig())
+	handler := pop3.Handler(cfg.Hostname, authAgent, msgStore, srv.TLSConfig())
 	srv.SetHandler(handler)
 
 	// Set up signal handling for graceful shutdown
