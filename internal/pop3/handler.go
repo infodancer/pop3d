@@ -7,7 +7,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/infodancer/auth/domain"
 	"github.com/infodancer/msgstore"
 	"github.com/infodancer/pop3d/internal/config"
 	"github.com/infodancer/pop3d/internal/logging"
@@ -15,17 +14,10 @@ import (
 	"github.com/infodancer/pop3d/internal/server"
 )
 
-// DomainProvider resolves email domains to their auth and store agents.
-// May be nil when domain-aware auth is not configured.
-type DomainProvider interface {
-	GetDomain(name string) *domain.Domain
-}
-
 // Handler creates a POP3 protocol handler with the given configuration.
-// domainProvider may be nil when domain-aware auth is not configured.
-func Handler(hostname string, authProvider AuthProvider, msgStore msgstore.MessageStore, domainProvider DomainProvider, tlsConfig *tls.Config, collector metrics.Collector) server.ConnectionHandler {
-	// Register authentication commands with the auth provider and message store
-	RegisterAuthCommands(authProvider, msgStore, domainProvider)
+func Handler(hostname string, auth DomainAuthenticator, msgStore msgstore.MessageStore, tlsConfig *tls.Config, collector metrics.Collector) server.ConnectionHandler {
+	// Register authentication commands with the auth router and message store
+	RegisterAuthCommands(auth, msgStore)
 	// Register transaction commands
 	RegisterTransactionCommands()
 
