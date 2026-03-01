@@ -390,43 +390,6 @@ func TestSessionPipeStore_ValidateMailbox(t *testing.T) {
 	}
 }
 
-// TestSessionPipeStore_RetrieveHeaders verifies HEADERS wire framing and content delivery.
-func TestSessionPipeStore_RetrieveHeaders(t *testing.T) {
-	headerData := "From: sender@example.com\r\nSubject: Test\r\n\r\nfirst body line\r\n"
-	h := newHarness(
-		"+OK mailbox ready\r\n" + // MAILBOX
-			"+OK 0 0\r\n" + // LIST (handshake)
-			fmt.Sprintf("+DATA %d\r\n", len(headerData)) + // HEADERS header
-			headerData,
-	)
-	ctx := context.Background()
-
-	// Trigger handshake.
-	if _, err := h.store.List(ctx, "user@example.com"); err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	h.cmdBuf.Reset()
-
-	// RetrieveHeaders is part of msgstore.MessageStore; the compile-time assertion
-	// in sessionpipe.go verifies sessionPipeStore satisfies the full interface.
-	rc, err := h.store.RetrieveHeaders(ctx, "user@example.com", "abc123", 1)
-	if err != nil {
-		t.Fatalf("RetrieveHeaders: %v", err)
-	}
-	got, err := io.ReadAll(rc)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-	_ = rc.Close()
-
-	if string(got) != headerData {
-		t.Errorf("content mismatch\nwant: %q\ngot:  %q", headerData, string(got))
-	}
-	if !strings.Contains(h.cmdBuf.String(), "HEADERS abc123 1\r\n") {
-		t.Errorf("HEADERS command not sent: %q", h.cmdBuf.String())
-	}
-}
-
 // TestSessionPipeStore_ExpungeBeforeHandshake verifies that Expunge triggers
 // the handshake when called before List.
 func TestSessionPipeStore_ExpungeBeforeHandshake(t *testing.T) {

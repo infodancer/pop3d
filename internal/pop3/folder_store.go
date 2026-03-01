@@ -1,7 +1,6 @@
 package pop3
 
 import (
-	"bytes"
 	"context"
 	"io"
 
@@ -37,20 +36,3 @@ func (a *folderMessageStore) Stat(ctx context.Context, mailbox string) (int, int
 	return a.fs.StatFolder(ctx, mailbox, a.folder)
 }
 
-func (a *folderMessageStore) RetrieveHeaders(ctx context.Context, mailbox, uid string, bodyLines int) (io.ReadCloser, error) {
-	rc, err := a.fs.RetrieveFromFolder(ctx, mailbox, a.folder, uid)
-	if err != nil {
-		return nil, err
-	}
-	lines, err := extractTopLines(rc, bodyLines)
-	_ = rc.Close()
-	if err != nil {
-		return nil, err
-	}
-	var buf bytes.Buffer
-	for _, line := range lines {
-		buf.WriteString(line)
-		buf.WriteString("\r\n")
-	}
-	return io.NopCloser(&buf), nil
-}

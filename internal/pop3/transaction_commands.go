@@ -326,26 +326,25 @@ func (t *topCommand) Execute(ctx context.Context, sess *Session, conn Connection
 		return Response{OK: false, Message: "Message store not available"}, nil
 	}
 
-	reader, err := store.RetrieveHeaders(ctx, sess.Mailbox(), msg.UID, lineCount)
+	reader, err := store.Retrieve(ctx, sess.Mailbox(), msg.UID)
 	if err != nil {
-		conn.Logger().Error("failed to retrieve headers",
+		conn.Logger().Error("failed to retrieve message content",
 			"msgNum", msgNum,
 			"uid", msg.UID,
 			"error", err.Error(),
 		)
 		return Response{OK: false, Message: "Failed to retrieve message"}, nil
 	}
-	data, err := io.ReadAll(reader)
+	lines, err := extractTopLines(reader, lineCount)
 	_ = reader.Close()
 	if err != nil {
-		conn.Logger().Error("failed to read headers",
+		conn.Logger().Error("failed to parse message",
 			"msgNum", msgNum,
 			"uid", msg.UID,
 			"error", err.Error(),
 		)
 		return Response{OK: false, Message: "Failed to read message"}, nil
 	}
-	lines := splitMessageLines(string(data))
 
 	return Response{
 		OK:      true,
