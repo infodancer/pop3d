@@ -111,6 +111,30 @@ func TestSessionPipeStore_ListNoRepeatHandshake(t *testing.T) {
 	}
 }
 
+// TestSessionPipeStore_ListWithFlags verifies that optional flag fields in LIST
+// entries (e.g. "\Seen") are ignored rather than causing a parse error.
+func TestSessionPipeStore_ListWithFlags(t *testing.T) {
+	h := newHarness(
+		"+OK mailbox ready\r\n" +
+			"+OK 2 1280\r\n" +
+			"abc123 512 \\Seen\r\n" +
+			"def456 768 \\Seen \\Answered\r\n",
+	)
+	msgs, err := h.store.List(context.Background(), "user@example.com")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	}
+	if msgs[0].UID != "abc123" || msgs[0].Size != 512 {
+		t.Errorf("msg[0]: uid=%q size=%d", msgs[0].UID, msgs[0].Size)
+	}
+	if msgs[1].UID != "def456" || msgs[1].Size != 768 {
+		t.Errorf("msg[1]: uid=%q size=%d", msgs[1].UID, msgs[1].Size)
+	}
+}
+
 // TestSessionPipeStore_ListEmpty verifies zero-message response.
 func TestSessionPipeStore_ListEmpty(t *testing.T) {
 	h := newHarness("+OK mailbox ready\r\n" + "+OK 0 0\r\n")

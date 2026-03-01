@@ -165,9 +165,9 @@ func (p *sessionPipeStore) List(ctx context.Context, mailbox string) ([]msgstore
 			return nil, fmt.Errorf("LIST entry %d: %w", i+1, err)
 		}
 		entry = strings.TrimRight(entry, "\r\n")
-		// "<uid> <size>"
+		// "<uid> <size> [flags…]" — flags are optional; ignore extra fields.
 		f := strings.Fields(entry)
-		if len(f) != 2 {
+		if len(f) < 2 {
 			return nil, fmt.Errorf("LIST entry %d: malformed %q", i+1, entry)
 		}
 		size, err := strconv.ParseInt(f[1], 10, 64)
