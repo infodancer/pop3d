@@ -11,6 +11,9 @@ import (
 	"github.com/infodancer/msgstore"
 )
 
+// Compile-time assertion that sessionPipeStore satisfies msgstore.MessageStore.
+var _ msgstore.MessageStore = (*sessionPipeStore)(nil)
+
 // maxListCount is a sanity cap on the number of messages a mail-session may
 // report. A legitimate mailbox will never approach this; the limit prevents
 // a compromised mail-session from causing an OOM allocation.
@@ -217,6 +220,33 @@ func (p *sessionPipeStore) Retrieve(ctx context.Context, mailbox, uid string) (i
 	}
 	// Wrap in a drainingCloser so that callers that stop reading early (e.g. TOP)
 	// do not leave unread bytes in sessR to corrupt the next protocol exchange.
+	return &drainingCloser{r: io.LimitReader(p.sessR, size)}, nil
+}
+
+// RetrieveHeaders implements HeadersStore.
+// Wire: send "HEADERS <uid> <lines>\r\n"; receive "+DATA <size>\r\n" then exactly <size> bytes.
+// mail-session returns the full header section plus up to <lines> body lines,
+// which is more efficient than GET for TOP requests on large messages.
+func (p *sessionPipeStore) RetrieveHeaders(ctx context.Context, mailbox, uid string, bodyLines int) (io.ReadCloser, error) {
+	if err := validateToken("uid", uid); err != nil {
+		return nil, err
+	}
+	if _, err := fmt.Fprintf(p.sessW, "HEADERS %s %d\r\n", uid, bodyLines); err != nil {
+		return nil, fmt.Errorf("send HEADERS: %w", err)
+	}
+	line, err := p.sessR.ReadString('\n')
+	if err != nil {
+		return nil, fmt.Errorf("read HEADERS response: %w", err)
+	}
+	line = strings.TrimRight(line, "\r\n")
+	if !strings.HasPrefix(line, "+DATA") {
+		return nil, fmt.Errorf("HEADERS error: %s", line)
+	}
+	sizeStr := strings.TrimSpace(strings.TrimPrefix(line, "+DATA"))
+	size, err := strconv.ParseInt(sizeStr, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("HEADERS: invalid data size %q", sizeStr)
+	}
 	return &drainingCloser{r: io.LimitReader(p.sessR, size)}, nil
 }
 

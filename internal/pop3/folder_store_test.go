@@ -51,6 +51,10 @@ func (m *mockFolderStore) Stat(_ context.Context, _ string) (int, int64, error) 
 	return len(m.inbox), total, nil
 }
 
+func (m *mockFolderStore) RetrieveHeaders(_ context.Context, _, uid string, _ int) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("Subject: " + uid + "\r\n\r\n")), nil
+}
+
 // FolderStore interface
 func (m *mockFolderStore) ListFolders(_ context.Context, _ string) ([]string, error) {
 	names := make([]string, 0, len(m.folders))

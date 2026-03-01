@@ -1,6 +1,7 @@
 package pop3
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"strings"
@@ -74,6 +75,24 @@ func (m *mockMessageStore) Stat(ctx context.Context, mailbox string) (int, int64
 		total += msg.Size
 	}
 	return len(m.messages), total, nil
+}
+
+func (m *mockMessageStore) RetrieveHeaders(ctx context.Context, mailbox string, uid string, bodyLines int) (io.ReadCloser, error) {
+	rc, err := m.Retrieve(ctx, mailbox, uid)
+	if err != nil {
+		return nil, err
+	}
+	lines, err := extractTopLines(rc, bodyLines)
+	_ = rc.Close()
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	for _, line := range lines {
+		buf.WriteString(line)
+		buf.WriteString("\r\n")
+	}
+	return io.NopCloser(&buf), nil
 }
 
 // Helper to create a session in TRANSACTION state with messages loaded
