@@ -366,6 +366,43 @@ func TestSessionPipeStore_ValidateMailbox(t *testing.T) {
 	}
 }
 
+// TestSessionPipeStore_ExpungeBeforeHandshake verifies that Expunge triggers
+// the handshake when called before List.
+func TestSessionPipeStore_ExpungeBeforeHandshake(t *testing.T) {
+	h := newHarness(
+		"+OK mailbox ready\r\n" + // MAILBOX (handshake)
+			"+OK committed\r\n", // COMMIT
+	)
+	if err := h.store.Expunge(context.Background(), "user@example.com"); err != nil {
+		t.Fatalf("Expunge: %v", err)
+	}
+	if !h.closed {
+		t.Error("authPipeW.Close was not called")
+	}
+}
+
+// TestSessionPipeStore_StatBeforeHandshake verifies that Stat triggers the
+// handshake when called before List.
+func TestSessionPipeStore_StatBeforeHandshake(t *testing.T) {
+	h := newHarness(
+		"+OK mailbox ready\r\n" + // MAILBOX (handshake)
+			"+OK 5 8192\r\n", // STAT
+	)
+	count, total, err := h.store.Stat(context.Background(), "user@example.com")
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if count != 5 {
+		t.Errorf("count: want 5, got %d", count)
+	}
+	if total != 8192 {
+		t.Errorf("total: want 8192, got %d", total)
+	}
+	if !h.closed {
+		t.Error("authPipeW.Close was not called")
+	}
+}
+
 // TestSessionPipeStore_ListCountCap verifies that an absurdly large count from
 // mail-session is rejected rather than causing an OOM allocation attempt.
 func TestSessionPipeStore_ListCountCap(t *testing.T) {

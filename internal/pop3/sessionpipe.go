@@ -236,6 +236,9 @@ func (p *sessionPipeStore) Delete(ctx context.Context, mailbox, uid string) erro
 // Sends COMMIT which causes mail-session to apply all pending deletions.
 // Wire: send "COMMIT\r\n"; receive "+OK\r\n".
 func (p *sessionPipeStore) Expunge(ctx context.Context, mailbox string) error {
+	if err := p.ensureReady(mailbox); err != nil {
+		return err
+	}
 	if _, err := fmt.Fprintf(p.sessW, "COMMIT\r\n"); err != nil {
 		return fmt.Errorf("send COMMIT: %w", err)
 	}
@@ -245,6 +248,9 @@ func (p *sessionPipeStore) Expunge(ctx context.Context, mailbox string) error {
 // Stat implements msgstore.MessageStore.
 // Wire: send "STAT\r\n"; receive "+OK <count> <octets>\r\n".
 func (p *sessionPipeStore) Stat(ctx context.Context, mailbox string) (int, int64, error) {
+	if err := p.ensureReady(mailbox); err != nil {
+		return 0, 0, err
+	}
 	if _, err := fmt.Fprintf(p.sessW, "STAT\r\n"); err != nil {
 		return 0, 0, fmt.Errorf("send STAT: %w", err)
 	}
