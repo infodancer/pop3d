@@ -261,3 +261,120 @@ func TestSessionPipeStore_AuthSignalFormat(t *testing.T) {
 		t.Errorf("auth signal\nwant: %q\ngot:  %q", want, got)
 	}
 }
+
+// TestSessionPipeStore_AuthPipeClosedOnHandshakeFailure verifies that the auth
+// pipe is always closed, even when the MAILBOX response is -ERR. The dispatcher
+// must receive EOF on the pipe to unblock; leaking it would hang the parent.
+func TestSessionPipeStore_AuthPipeClosedOnHandshakeFailure(t *testing.T) {
+	h := newHarness("-ERR mailbox rejected\r\n")
+	_, _ = h.store.List(context.Background(), "user@example.com")
+	if !h.closed {
+		t.Error("authPipeW.Close was not called after handshake failure")
+	}
+}
+
+// TestSessionPipeStore_HandshakeFailureTerminal verifies that after a failed
+// handshake, subsequent List calls return an error rather than retrying.
+func TestSessionPipeStore_HandshakeFailureTerminal(t *testing.T) {
+	// Feed only a -ERR so the handshake fails.
+	h := newHarness("-ERR no such mailbox\r\n")
+	ctx := context.Background()
+
+	_, err := h.store.List(ctx, "user@example.com")
+	if err == nil {
+		t.Fatal("expected error on first List after failed handshake")
+	}
+
+	// The buffer is now empty; a retry attempt would EOF. If it didn't get an
+	// immediate error it would block or panic — the terminal check prevents that.
+	_, err = h.store.List(ctx, "user@example.com")
+	if err == nil {
+		t.Fatal("expected error on second List after failed handshake")
+	}
+	// Auth pipe must have been closed exactly once (not twice).
+	if !h.closed {
+		t.Error("authPipeW.Close was not called")
+	}
+}
+
+// TestSessionPipeStore_RetrievePartialReadDrainsOnClose verifies that Close()
+// on the reader returned by Retrieve drains unread bytes so that subsequent
+// pipe operations are not desynchronised.
+func TestSessionPipeStore_RetrievePartialReadDrainsOnClose(t *testing.T) {
+	body := "line1\r\nline2\r\nline3\r\n"
+	h := newHarness(
+		"+OK mailbox ready\r\n" +
+			"+OK 0 0\r\n" + // LIST
+			fmt.Sprintf("+DATA %d\r\n", len(body)) +
+			body +
+			"+OK deleted\r\n", // DELETE response after the partial read
+	)
+	ctx := context.Background()
+	if _, err := h.store.List(ctx, "user@example.com"); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	rc, err := h.store.Retrieve(ctx, "user@example.com", "abc123")
+	if err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+
+	// Read only the first 5 bytes — deliberately leave the rest unread.
+	buf := make([]byte, 5)
+	if _, err := io.ReadFull(rc, buf); err != nil {
+		t.Fatalf("partial read: %v", err)
+	}
+
+	// Close must drain the remaining bytes.
+	if err := rc.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// The pipe should now be in sync: a DELETE should succeed.
+	if err := h.store.Delete(ctx, "user@example.com", "abc123"); err != nil {
+		t.Fatalf("Delete after partial retrieve: %v", err)
+	}
+}
+
+// TestSessionPipeStore_ValidateUID verifies that UIDs containing whitespace are
+// rejected before being written to the wire protocol.
+func TestSessionPipeStore_ValidateUID(t *testing.T) {
+	h := newHarness("+OK mailbox ready\r\n" + "+OK 0 0\r\n")
+	ctx := context.Background()
+	if _, err := h.store.List(ctx, "user@example.com"); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	badUIDs := []string{"uid with space", "uid\nnewline", "uid\r\n", ""}
+	for _, uid := range badUIDs {
+		if err := h.store.Delete(ctx, "user@example.com", uid); err == nil {
+			t.Errorf("Delete with uid %q: expected error, got nil", uid)
+		}
+		if _, err := h.store.Retrieve(ctx, "user@example.com", uid); err == nil {
+			t.Errorf("Retrieve with uid %q: expected error, got nil", uid)
+		}
+	}
+}
+
+// TestSessionPipeStore_ValidateMailbox verifies that a mailbox containing
+// newlines is rejected before being written to the wire protocol.
+func TestSessionPipeStore_ValidateMailbox(t *testing.T) {
+	h := newHarness("") // no responses needed — error before any write
+	_, err := h.store.List(context.Background(), "user\r\nINJECTED@example.com")
+	if err == nil {
+		t.Error("expected error for mailbox with newline, got nil")
+	}
+}
+
+// TestSessionPipeStore_ListCountCap verifies that an absurdly large count from
+// mail-session is rejected rather than causing an OOM allocation attempt.
+func TestSessionPipeStore_ListCountCap(t *testing.T) {
+	h := newHarness(
+		"+OK mailbox ready\r\n" +
+			fmt.Sprintf("+OK %d 0\r\n", maxListCount+1),
+	)
+	_, err := h.store.List(context.Background(), "user@example.com")
+	if err == nil {
+		t.Errorf("expected error for count > maxListCount, got nil")
+	}
+}

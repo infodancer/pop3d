@@ -81,6 +81,10 @@ func runProtocolHandler() {
 	authPipeFile := os.NewFile(uintptr(authPipeFD), "auth-pipe-w")
 	fromSessFile := os.NewFile(uintptr(fromSessFD), "from-session")
 	toSessFile := os.NewFile(uintptr(toSessFD), "to-session")
+	if authPipeFile == nil || fromSessFile == nil || toSessFile == nil {
+		fmt.Fprintf(os.Stderr, "protocol-handler: session pipe fds not available\n")
+		os.Exit(1)
+	}
 	sessionStore := pop3.NewSessionPipeStore(authPipeFile, fromSessFile, toSessFile)
 
 	// Build the protocol stack. Each subprocess gets its own stack instance;

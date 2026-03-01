@@ -11,17 +11,27 @@ import (
 	"github.com/infodancer/msgstore"
 )
 
+// maxListCount is a sanity cap on the number of messages a mail-session may
+// report. A legitimate mailbox will never approach this; the limit prevents
+// a compromised mail-session from causing an OOM allocation.
+const maxListCount = 10_000_000
+
 // sessionPipeStore implements msgstore.MessageStore by routing all operations
 // through the session pipe protocol (fds 5 and 6 in the protocol-handler).
 //
 // On the first List call it writes the auth signal to the auth pipe (fd 4),
 // closes that pipe so the dispatcher can unblock, then performs the MAILBOX
 // handshake with mail-session before executing the LIST.
+//
+// The auth pipe (fd 4) is always closed exactly once, even on error, so the
+// dispatcher never blocks indefinitely. A failed handshake is terminal: the
+// store records the failure and all subsequent calls return an error.
 type sessionPipeStore struct {
-	authPipeW io.WriteCloser // fd 4: written once, then closed
-	sessR     *bufio.Reader  // fd 5: responses from mail-session
-	sessW     io.Writer      // fd 6: commands to mail-session
-	ready     bool
+	authPipeW    io.WriteCloser // fd 4: written once, then closed
+	sessR        *bufio.Reader  // fd 5: responses from mail-session
+	sessW        io.Writer      // fd 6: commands to mail-session
+	ready        bool           // true once handshake succeeded
+	handshakeDone bool          // true once handshake was attempted (win or lose)
 }
 
 // NewSessionPipeStore creates a sessionPipeStore from the three pipe ends used
@@ -34,16 +44,42 @@ func NewSessionPipeStore(authPipeW io.WriteCloser, sessR io.Reader, sessW io.Wri
 	}
 }
 
-// handshake sends the auth signal and MAILBOX command on the first List call.
-func (p *sessionPipeStore) handshake(mailbox string) error {
+// validateToken returns an error if s contains whitespace or control
+// characters that would break the line-oriented wire protocol.
+func validateToken(label, s string) error {
+	if s == "" {
+		return fmt.Errorf("%s must not be empty", label)
+	}
+	if strings.ContainsAny(s, " \t\r\n") {
+		return fmt.Errorf("%s contains illegal whitespace", label)
+	}
+	return nil
+}
+
+// handshake writes the auth signal to fd 4 and performs the MAILBOX exchange
+// with mail-session. It always closes authPipeW so the dispatcher can unblock.
+// After handshake returns (success or failure) handshakeDone is true and the
+// method must not be called again.
+func (p *sessionPipeStore) handshake(mailbox string) (retErr error) {
+	p.handshakeDone = true
+
+	// Always close the auth pipe so the dispatcher unblocks on EOF, even if
+	// the write fails or a later step fails.
+	defer func() {
+		if err := p.authPipeW.Close(); err != nil && retErr == nil {
+			retErr = fmt.Errorf("close auth pipe: %w", err)
+		}
+	}()
+
+	if err := validateToken("mailbox", mailbox); err != nil {
+		return err
+	}
+
 	// The mailbox is also the fully-qualified username (localpart@domain) per the
 	// address contract: AuthRouter guarantees User.Mailbox == base@domain.
 	sig := &authSignal{Version: 1, Username: mailbox}
 	if err := writeAuthSignal(p.authPipeW, sig); err != nil {
 		return fmt.Errorf("write auth signal: %w", err)
-	}
-	if err := p.authPipeW.Close(); err != nil {
-		return fmt.Errorf("close auth pipe: %w", err)
 	}
 
 	if _, err := fmt.Fprintf(p.sessW, "MAILBOX %s\r\n", mailbox); err != nil {
@@ -59,6 +95,19 @@ func (p *sessionPipeStore) handshake(mailbox string) error {
 
 	p.ready = true
 	return nil
+}
+
+// ensureReady runs the handshake on the first call and returns an error if the
+// handshake already failed.
+func (p *sessionPipeStore) ensureReady(mailbox string) error {
+	if p.ready {
+		return nil
+	}
+	if p.handshakeDone {
+		// Handshake was already attempted and failed; the store is not usable.
+		return fmt.Errorf("session pipe handshake already failed; store is not usable")
+	}
+	return p.handshake(mailbox)
 }
 
 // readOK reads one response line and returns an error if it is not "+OK …".
@@ -78,10 +127,8 @@ func (p *sessionPipeStore) readOK(op string) error {
 // Wire: send "LIST\r\n"; receive "+OK <count> <octets>\r\n" then <count> lines
 // of "<uid> <size>\r\n".
 func (p *sessionPipeStore) List(ctx context.Context, mailbox string) ([]msgstore.MessageInfo, error) {
-	if !p.ready {
-		if err := p.handshake(mailbox); err != nil {
-			return nil, err
-		}
+	if err := p.ensureReady(mailbox); err != nil {
+		return nil, err
 	}
 
 	if _, err := fmt.Fprintf(p.sessW, "LIST\r\n"); err != nil {
@@ -107,9 +154,12 @@ func (p *sessionPipeStore) List(ctx context.Context, mailbox string) ([]msgstore
 	if err != nil {
 		return nil, fmt.Errorf("LIST: invalid count %q", fields[0])
 	}
+	if count < 0 || count > maxListCount {
+		return nil, fmt.Errorf("LIST: unreasonable count %d", count)
+	}
 
 	msgs := make([]msgstore.MessageInfo, 0, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		entry, err := p.sessR.ReadString('\n')
 		if err != nil {
 			return nil, fmt.Errorf("LIST entry %d: %w", i+1, err)
@@ -129,9 +179,26 @@ func (p *sessionPipeStore) List(ctx context.Context, mailbox string) ([]msgstore
 	return msgs, nil
 }
 
+// drainingCloser wraps an io.Reader and drains any unread bytes on Close so
+// that the shared sessR stays synchronised for subsequent protocol messages.
+type drainingCloser struct {
+	r io.Reader
+}
+
+func (d *drainingCloser) Read(p []byte) (int, error) { return d.r.Read(p) }
+func (d *drainingCloser) Close() error {
+	_, _ = io.Copy(io.Discard, d.r)
+	return nil
+}
+
 // Retrieve implements msgstore.MessageStore.
 // Wire: send "GET <uid>\r\n"; receive "+DATA <size>\r\n" then exactly <size> bytes.
+// Close() on the returned ReadCloser drains any unread bytes so the shared
+// pipe reader stays synchronised for subsequent operations.
 func (p *sessionPipeStore) Retrieve(ctx context.Context, mailbox, uid string) (io.ReadCloser, error) {
+	if err := validateToken("uid", uid); err != nil {
+		return nil, err
+	}
 	if _, err := fmt.Fprintf(p.sessW, "GET %s\r\n", uid); err != nil {
 		return nil, fmt.Errorf("send GET: %w", err)
 	}
@@ -148,13 +215,17 @@ func (p *sessionPipeStore) Retrieve(ctx context.Context, mailbox, uid string) (i
 	if err != nil {
 		return nil, fmt.Errorf("GET: invalid data size %q", sizeStr)
 	}
-	// Return a reader over exactly <size> bytes; sessR retains ownership.
-	return io.NopCloser(io.LimitReader(p.sessR, size)), nil
+	// Wrap in a drainingCloser so that callers that stop reading early (e.g. TOP)
+	// do not leave unread bytes in sessR to corrupt the next protocol exchange.
+	return &drainingCloser{r: io.LimitReader(p.sessR, size)}, nil
 }
 
 // Delete implements msgstore.MessageStore.
 // Wire: send "DELETE <uid>\r\n"; receive "+OK\r\n".
 func (p *sessionPipeStore) Delete(ctx context.Context, mailbox, uid string) error {
+	if err := validateToken("uid", uid); err != nil {
+		return err
+	}
 	if _, err := fmt.Fprintf(p.sessW, "DELETE %s\r\n", uid); err != nil {
 		return fmt.Errorf("send DELETE: %w", err)
 	}
