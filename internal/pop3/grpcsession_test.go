@@ -6,17 +6,15 @@ import (
 )
 
 func TestGrpcSessionStore_HandshakeFailsOnEmptyMailbox(t *testing.T) {
-	// Create a pipe pair for the auth pipe and session response pipe.
 	authR, authW := io.Pipe()
-	defer authR.Close()
+	defer func() { _ = authR.Close() }()
 
 	sessR, sessW := io.Pipe()
-	defer sessR.Close()
-	defer sessW.Close()
+	defer func() { _ = sessR.Close() }()
+	defer func() { _ = sessW.Close() }()
 
 	store := NewGrpcSessionStore(authW, sessR)
 
-	// List with empty mailbox should fail validation.
 	_, err := store.List(t.Context(), "")
 	if err == nil {
 		t.Fatal("expected error for empty mailbox")
@@ -25,11 +23,11 @@ func TestGrpcSessionStore_HandshakeFailsOnEmptyMailbox(t *testing.T) {
 
 func TestGrpcSessionStore_HandshakeFailsOnWhitespaceMailbox(t *testing.T) {
 	authR, authW := io.Pipe()
-	defer authR.Close()
+	defer func() { _ = authR.Close() }()
 
 	sessR, sessW := io.Pipe()
-	defer sessR.Close()
-	defer sessW.Close()
+	defer func() { _ = sessR.Close() }()
+	defer func() { _ = sessW.Close() }()
 
 	store := NewGrpcSessionStore(authW, sessR)
 
@@ -41,11 +39,11 @@ func TestGrpcSessionStore_HandshakeFailsOnWhitespaceMailbox(t *testing.T) {
 
 func TestGrpcSessionStore_DoubleHandshakeReturnsError(t *testing.T) {
 	authR, authW := io.Pipe()
-	defer authR.Close()
+	defer func() { _ = authR.Close() }()
 
 	sessR, sessW := io.Pipe()
-	defer sessR.Close()
-	defer sessW.Close()
+	defer func() { _ = sessR.Close() }()
+	defer func() { _ = sessW.Close() }()
 
 	store := NewGrpcSessionStore(authW, sessR)
 
