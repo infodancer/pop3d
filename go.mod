@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
-	github.com/infodancer/auth v0.1.11
+	github.com/infodancer/auth v0.1.14
 	github.com/infodancer/mail-session v0.1.2
 	github.com/infodancer/msgstore v0.2.2-0.20260303202932-60ef82df8079
 	github.com/infodancer/session-manager v0.1.0
