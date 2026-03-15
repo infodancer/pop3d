@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/infodancer/auth"
 	"github.com/infodancer/msgstore"
 	"github.com/infodancer/pop3d/internal/config"
 )
@@ -79,11 +78,9 @@ func (m *mockMessageStore) Stat(ctx context.Context, mailbox string) (int, int64
 // Helper to create a session in TRANSACTION state with messages loaded
 func newTransactionSession(store msgstore.MessageStore) *Session {
 	sess := NewSession("test.example.com", config.ModePop3s, nil, true)
-	sess.SetAuthenticated(&auth.AuthSession{
-		User: &auth.User{
-			Username: "testuser",
-			Mailbox:  "/var/mail/testuser",
-		},
+	sess.SetAuthenticated(AuthenticatedUser{
+		Username: "testuser",
+		Mailbox:  "/var/mail/testuser",
 	})
 	if store != nil {
 		_ = sess.InitializeMailbox(context.Background(), store, "")
