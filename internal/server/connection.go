@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/infodancer/pop3d/internal/logging"
+	"github.com/infodancer/logging"
 )
 
 // Connection wraps a net.Conn with timeout management and optional transaction logging.

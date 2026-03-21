@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/infodancer/logging"
 	pb "github.com/infodancer/mail-session/proto/mailsession/v1"
 	"github.com/infodancer/pop3d/internal/config"
-	"github.com/infodancer/pop3d/internal/logging"
 	"github.com/infodancer/pop3d/internal/metrics"
 	"github.com/infodancer/pop3d/internal/pop3"
 	smpb "github.com/infodancer/session-manager/proto/sessionmanager/v1"

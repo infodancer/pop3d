@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/infodancer/logging"
 	"github.com/infodancer/pop3d/internal/config"
-	"github.com/infodancer/pop3d/internal/logging"
 )
 
 // Server coordinates multiple listeners and handles POP3 connections.

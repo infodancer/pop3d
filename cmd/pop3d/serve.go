@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/infodancer/logging"
 	"github.com/infodancer/pop3d/internal/config"
-	"github.com/infodancer/pop3d/internal/logging"
 	"github.com/infodancer/pop3d/internal/metrics"
 	"github.com/infodancer/pop3d/internal/pop3"
 )
